@@ -56,7 +56,7 @@ def create_refresh_token(user_id: str) -> str:
 
 def set_auth_cookies(response: Response, access_token: str, refresh_token: str):
     response.set_cookie(key="access_token", value=access_token, httponly=True, secure=True, samesite="none", max_age=900, path="/")
-    response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, secure=True, samesite="none", max_age=604800, path="/")
+    response.set_cookie(key="refresh_token", value=refresh_token, httponly=True, secure=True, samesite="none", max_age=2592000, path="/")
 
 # --- Auth Helper ---
 async def get_current_user(request: Request) -> dict:
@@ -129,6 +129,7 @@ class SettingsInput(BaseModel):
     wake_time: Optional[str] = None
     sleep_time: Optional[str] = None
     custom_reminder_times: Optional[List[str]] = None
+    quick_add_position: Optional[str] = None
 
 class AddReminderTimeInput(BaseModel):
     time: str
@@ -175,7 +176,8 @@ async def register(input: RegisterInput, response: Response):
         "reminder_enabled": True,
         "wake_time": "08:00",
         "sleep_time": "22:00",
-        "custom_reminder_times": []
+        "custom_reminder_times": [],
+        "quick_add_position": "bottom-right"
     })
     access_token = create_access_token(user_id, email)
     refresh_token = create_refresh_token(user_id)
@@ -316,7 +318,8 @@ async def firebase_login(input: FirebaseLoginInput, response: Response):
             "reminder_interval": 60,
             "notification_type": "vibrate_sound",
             "theme": "light",
-            "reminder_enabled": True
+            "reminder_enabled": True,
+            "quick_add_position": "bottom-right"
         })
     else:
         user_id = str(user["_id"])
@@ -409,7 +412,8 @@ async def get_settings(request: Request):
             "reminder_enabled": True,
             "wake_time": "08:00",
             "sleep_time": "22:00",
-            "custom_reminder_times": []
+            "custom_reminder_times": [],
+            "quick_add_position": "bottom-right"
         }
         await db.settings.insert_one(settings)
         settings.pop("_id", None)
@@ -508,7 +512,7 @@ async def startup():
         admin_id = str(result.inserted_id)
         await db.settings.update_one(
             {"user_id": admin_id},
-            {"$set": {"user_id": admin_id, "daily_goal": 2000, "reminder_interval": 60, "notification_type": "vibrate_sound", "custom_sound": "default", "theme": "light", "reminder_enabled": True, "wake_time": "08:00", "sleep_time": "22:00", "custom_reminder_times": []}},
+            {"$set": {"user_id": admin_id, "daily_goal": 2000, "reminder_interval": 60, "notification_type": "vibrate_sound", "custom_sound": "default", "theme": "light", "reminder_enabled": True, "wake_time": "08:00", "sleep_time": "22:00", "custom_reminder_times": [], "quick_add_position": "bottom-right"}},
             upsert=True
         )
         logger.info(f"Admin seeded: {admin_email}")
