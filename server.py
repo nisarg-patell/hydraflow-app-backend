@@ -482,7 +482,7 @@ app.include_router(api_router)
 # --- CORS ---
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=os.environ.get("CORS_ORIGINS", "*").split(",") if os.environ.get("CORS_ORIGINS") != "*" else ["*"],
+    allow_origins=os.environ.get("CORS_ORIGINS", "http://localhost:3000,https://hydraflow-app.vercel.app").split(","),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
