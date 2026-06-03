@@ -121,6 +121,12 @@ class RefreshTokenInput(BaseModel):
 class WaterLogInput(BaseModel):
     amount: int
     label: Optional[str] = "Water"
+    beverage_type: Optional[str] = "water"
+    multiplier: Optional[float] = 1.0
+
+class DailyModifierInput(BaseModel):
+    workout: Optional[bool] = None
+    urine_color: Optional[int] = None
 
 class SettingsInput(BaseModel):
     daily_goal: Optional[int] = None
@@ -133,6 +139,9 @@ class SettingsInput(BaseModel):
     sleep_time: Optional[str] = None
     custom_reminder_times: Optional[List[str]] = None
     quick_add_position: Optional[str] = None
+    notification_panel_enabled: Optional[bool] = None
+    notification_amount1: Optional[int] = None
+    notification_amount2: Optional[int] = None
 
 class AddReminderTimeInput(BaseModel):
     time: str
@@ -338,14 +347,18 @@ async def firebase_login(input: FirebaseLoginInput, response: Response):
 @api_router.post("/water/log")
 async def log_water(input: WaterLogInput, request: Request):
     user = await get_current_user(request)
+    effective_amount = int(input.amount * input.multiplier)
     log_doc = {
         "user_id": user["_id"],
         "amount": input.amount,
+        "effective_amount": effective_amount,
         "label": input.label,
+        "beverage_type": input.beverage_type,
+        "multiplier": input.multiplier,
         "timestamp": datetime.now(timezone.utc).isoformat()
     }
     await db.water_logs.insert_one(log_doc)
-    return {"message": "Logged", "amount": input.amount, "label": input.label}
+    return {"message": "Logged", "amount": input.amount, "effective_amount": effective_amount, "label": input.label}
 
 @api_router.get("/water/today")
 async def get_today_water(request: Request):
@@ -355,8 +368,41 @@ async def get_today_water(request: Request):
         {"user_id": user["_id"], "timestamp": {"$gte": today_start}},
         {"_id": 0}
     ).sort("timestamp", -1).to_list(100)
-    total = sum(log["amount"] for log in logs)
-    return {"logs": logs, "total": total}
+    total = sum(log.get("effective_amount", log["amount"]) for log in logs)
+    
+    settings = await db.settings.find_one({"user_id": user["_id"]})
+    base_goal = settings.get("daily_goal", 2000) if settings else 2000
+    
+    modifier = await db.daily_modifiers.find_one({"user_id": user["_id"], "date": today_start.split("T")[0]})
+    dynamic_goal = base_goal
+    if modifier:
+        if modifier.get("workout"):
+            dynamic_goal += 500
+        urine_color = modifier.get("urine_color")
+        if urine_color:
+            if urine_color >= 4:
+                dynamic_goal += 500
+            elif urine_color <= 2:
+                dynamic_goal -= 200
+                
+    return {"logs": logs, "total": total, "dynamic_goal": dynamic_goal}
+
+@api_router.post("/daily-modifiers")
+async def update_daily_modifiers(input: DailyModifierInput, request: Request):
+    user = await get_current_user(request)
+    today_date = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    
+    update_fields = {}
+    if input.workout is not None: update_fields["workout"] = input.workout
+    if input.urine_color is not None: update_fields["urine_color"] = input.urine_color
+    
+    if update_fields:
+        await db.daily_modifiers.update_one(
+            {"user_id": user["_id"], "date": today_date},
+            {"$set": update_fields},
+            upsert=True
+        )
+    return {"message": "Modifiers updated"}
 
 @api_router.get("/water/history")
 async def get_water_history(request: Request, days: int = 7):
@@ -364,18 +410,18 @@ async def get_water_history(request: Request, days: int = 7):
     start_date = (datetime.now(timezone.utc) - timedelta(days=days)).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     logs = await db.water_logs.find(
         {"user_id": user["_id"], "timestamp": {"$gte": start_date}},
-        {"_id": 0}
-    ).to_list(1000)
-    # Group by date
-    daily = {}
+        ).sort("timestamp", -1).to_list(1000)
+    
+    history = {}
     for log in logs:
-        date_str = log["timestamp"][:10]
-        daily[date_str] = daily.get(date_str, 0) + log["amount"]
+        date = log["timestamp"].split("T")[0]
+        amt = log.get("effective_amount", log["amount"])
+        history[date] = history.get(date, 0) + amt
     # Build array for last N days
     result = []
     for i in range(days):
         d = (datetime.now(timezone.utc) - timedelta(days=days - 1 - i)).strftime("%Y-%m-%d")
-        result.append({"date": d, "amount": daily.get(d, 0)})
+        result.append({"date": d, "amount": history.get(d, 0)})
     return {"history": result}
 
 @api_router.delete("/water/log/{timestamp}")
