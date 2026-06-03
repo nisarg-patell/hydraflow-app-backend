@@ -51,7 +51,7 @@ def create_access_token(user_id: str, email: str) -> str:
     return jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
 
 def create_refresh_token(user_id: str) -> str:
-    payload = {"sub": user_id, "exp": datetime.now(timezone.utc) + timedelta(days=7), "type": "refresh"}
+    payload = {"sub": user_id, "exp": datetime.now(timezone.utc) + timedelta(days=365), "type": "refresh"}
     return jwt.encode(payload, get_jwt_secret(), algorithm=JWT_ALGORITHM)
 
 def set_auth_cookies(response: Response, access_token: str, refresh_token: str):
@@ -114,6 +114,9 @@ class RegisterInput(BaseModel):
 class LoginInput(BaseModel):
     email: str
     password: str
+
+class RefreshTokenInput(BaseModel):
+    refresh_token: Optional[str] = None
 
 class WaterLogInput(BaseModel):
     amount: int
@@ -182,7 +185,7 @@ async def register(input: RegisterInput, response: Response):
     access_token = create_access_token(user_id, email)
     refresh_token = create_refresh_token(user_id)
     set_auth_cookies(response, access_token, refresh_token)
-    return {"_id": user_id, "email": email, "name": input.name, "role": "user"}
+    return {"_id": user_id, "email": email, "name": input.name, "role": "user", "access_token": access_token, "refresh_token": refresh_token}
 
 @api_router.post("/auth/login")
 async def login(input: LoginInput, request: Request, response: Response):
@@ -203,7 +206,7 @@ async def login(input: LoginInput, request: Request, response: Response):
     access_token = create_access_token(user_id, email)
     refresh_token = create_refresh_token(user_id)
     set_auth_cookies(response, access_token, refresh_token)
-    return {"_id": user_id, "email": email, "name": user.get("name", ""), "role": user.get("role", "user")}
+    return {"_id": user_id, "email": email, "name": user.get("name", ""), "role": user.get("role", "user"), "access_token": access_token, "refresh_token": refresh_token}
 
 @api_router.post("/auth/logout")
 async def logout(response: Response):
@@ -217,8 +220,8 @@ async def get_me(request: Request):
     return user
 
 @api_router.post("/auth/refresh")
-async def refresh_token(request: Request, response: Response):
-    token = request.cookies.get("refresh_token")
+async def refresh_token(request: Request, response: Response, input: RefreshTokenInput = None):
+    token = (input.refresh_token if input else None) or request.cookies.get("refresh_token")
     if not token:
         raise HTTPException(status_code=401, detail="No refresh token")
     try:
@@ -230,8 +233,9 @@ async def refresh_token(request: Request, response: Response):
             raise HTTPException(status_code=401, detail="User not found")
         user_id = str(user["_id"])
         access_token = create_access_token(user_id, user["email"])
-        response.set_cookie(key="access_token", value=access_token, httponly=True, secure=True, samesite="none", max_age=900, path="/")
-        return {"message": "Token refreshed"}
+        new_refresh_token = create_refresh_token(user_id)
+        set_auth_cookies(response, access_token, new_refresh_token)
+        return {"message": "Token refreshed", "access_token": access_token, "refresh_token": new_refresh_token}
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Refresh token expired")
     except jwt.InvalidTokenError:
@@ -328,7 +332,7 @@ async def firebase_login(input: FirebaseLoginInput, response: Response):
     refresh_token = create_refresh_token(user_id)
     set_auth_cookies(response, access_token, refresh_token)
     
-    return {"_id": user_id, "email": email, "name": name, "role": user.get("role", "user") if user else "user"}
+    return {"_id": user_id, "email": email, "name": name, "role": user.get("role", "user") if user else "user", "access_token": access_token, "refresh_token": refresh_token}
 
 # --- Water Log Endpoints ---
 @api_router.post("/water/log")
