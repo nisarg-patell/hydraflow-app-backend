@@ -124,6 +124,9 @@ class WaterLogInput(BaseModel):
     beverage_type: Optional[str] = "water"
     multiplier: Optional[float] = 1.0
 
+class UpdateWaterLogInput(BaseModel):
+    amount: int
+
 class DailyModifierInput(BaseModel):
     workout: Optional[bool] = None
     urine_color: Optional[int] = None
@@ -143,6 +146,7 @@ class SettingsInput(BaseModel):
     notification_amount1: Optional[int] = None
     notification_amount2: Optional[int] = None
     haptic_feedback: Optional[bool] = None
+    liquid_background: Optional[bool] = None
 
 class AddReminderTimeInput(BaseModel):
     time: str
@@ -432,6 +436,22 @@ async def delete_water_log(timestamp: str, request: Request):
     if result.deleted_count == 0:
         raise HTTPException(status_code=404, detail="Log not found")
     return {"message": "Deleted"}
+
+@api_router.put("/water/log/{timestamp}")
+async def update_water_log(timestamp: str, input: UpdateWaterLogInput, request: Request):
+    user = await get_current_user(request)
+    log = await db.water_logs.find_one({"user_id": user["_id"], "timestamp": timestamp})
+    if not log:
+        raise HTTPException(status_code=404, detail="Log not found")
+    
+    multiplier = log.get("multiplier", 1.0)
+    effective_amount = int(input.amount * multiplier)
+    
+    await db.water_logs.update_one(
+        {"_id": log["_id"]},
+        {"$set": {"amount": input.amount, "effective_amount": effective_amount}}
+    )
+    return {"message": "Updated", "amount": input.amount, "effective_amount": effective_amount}
 
 @api_router.post("/water/undo")
 async def undo_water(input: WaterLogInput, request: Request):
