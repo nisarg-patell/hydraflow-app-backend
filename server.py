@@ -142,6 +142,7 @@ class SettingsInput(BaseModel):
     notification_panel_enabled: Optional[bool] = None
     notification_amount1: Optional[int] = None
     notification_amount2: Optional[int] = None
+    haptic_feedback: Optional[bool] = None
 
 class AddReminderTimeInput(BaseModel):
     time: str
