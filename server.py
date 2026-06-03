@@ -11,6 +11,8 @@ from motor.motor_asyncio import AsyncIOMotorClient
 from requests_oauthlib import OAuth2Session
 from bson import ObjectId
 import os
+import io
+from PIL import Image, ImageDraw, ImageFont
 import logging
 import bcrypt
 import jwt
@@ -428,6 +430,52 @@ async def get_water_history(request: Request, days: int = 7):
         d = (datetime.now(timezone.utc) - timedelta(days=days - 1 - i)).strftime("%Y-%m-%d")
         result.append({"date": d, "amount": history.get(d, 0)})
     return {"history": result}
+
+@api_router.get("/water/progress_image")
+async def get_progress_image(total: int = 0, goal: int = 2000):
+    size = 400
+    img = Image.new("RGBA", (size, size), (24, 24, 27, 255)) # Dark background to match app
+    draw = ImageDraw.Draw(img)
+    
+    # Draw background track
+    box = [40, 40, size - 40, size - 40]
+    draw.arc(box, start=0, end=360, fill=(39, 39, 42, 255), width=30)
+    
+    # Calculate sweep angle based on percentage
+    percentage = min(1.0, total / max(1, goal))
+    sweep_angle = int(percentage * 360)
+    
+    if sweep_angle > 0:
+        # Draw progress arc (start at -90 degrees / top)
+        draw.arc(box, start=-90, end=-90 + sweep_angle, fill=(56, 189, 248, 255), width=30)
+        
+    # Draw text
+    try:
+        # Try to load a nice font, fallback to default
+        font = ImageFont.truetype("arial.ttf", 60)
+        font_small = ImageFont.truetype("arial.ttf", 30)
+    except:
+        font = ImageFont.load_default()
+        font_small = ImageFont.load_default()
+        
+    # Draw total
+    text_total = f"{total}ml"
+    total_bbox = draw.textbbox((0, 0), text_total, font=font)
+    total_w = total_bbox[2] - total_bbox[0]
+    draw.text(((size - total_w) / 2, size / 2 - 40), text_total, font=font, fill=(255, 255, 255, 255))
+    
+    # Draw goal
+    text_goal = f"/ {goal}ml"
+    goal_bbox = draw.textbbox((0, 0), text_goal, font=font_small)
+    goal_w = goal_bbox[2] - goal_bbox[0]
+    draw.text(((size - goal_w) / 2, size / 2 + 30), text_goal, font=font_small, fill=(161, 161, 170, 255))
+    
+    # Save to bytes
+    buf = io.BytesIO()
+    img.save(buf, format="PNG")
+    buf.seek(0)
+    
+    return Response(content=buf.read(), media_type="image/png", headers={"Cache-Control": "no-store"})
 
 @api_router.delete("/water/log/{timestamp}")
 async def delete_water_log(timestamp: str, request: Request):
